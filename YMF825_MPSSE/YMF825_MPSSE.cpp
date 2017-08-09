@@ -89,7 +89,7 @@ static uint8 buffer[SPI_DEVICE_BUFFER_SIZE] = { 0 };
 void reset()
 {
 	FT_WriteGPIO(ftHandle, 0xff, 0xff);
-	FT_WriteGPIO(ftHandle, 0xff, 0xfe);
+	FT_WriteGPIO(ftHandle, 0xff, 0x0);
 	::Sleep(1);
 	FT_WriteGPIO(ftHandle, 0xff, 0xff);
 }
@@ -113,6 +113,9 @@ void write_reg(uint8 addr, uint8 data)
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
 	APP_CHECK_STATUS(status);
+	if (sizeToTransfer == sizeTransfered) {
+		printf("write_reg %02X, %02X OK\n", addr, data);
+	}
 }
 
 void write_burst(uint8 addr, uint8* data, uint32 size)
@@ -143,10 +146,14 @@ uint8 read_reg(uint8 addr)
 	uint32 sizeTransfered = 0;
 	uint8 writeComplete = 0;
 	uint32 retry = 0;
+	uint8 buf = 0x80 | addr;
 	FT_STATUS status;
+	status = SPI_Write(ftHandle, &buf, sizeToTransfer, &sizeTransfered,
+		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES |
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE);
+	APP_CHECK_STATUS(status);
 	status = SPI_Read(ftHandle, &ret, sizeToTransfer, &sizeTransfered,
 		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
 	APP_CHECK_STATUS(status);
 	return ret;
@@ -166,9 +173,15 @@ uint8 read_reg(uint8 addr)
 */
 #define OUTPUT_power 0
 
+uint16 freqtable[] = {
+	//c  c+   d    d+   e    f    f+   g    g+   a    a+   b
+	357, 378, 401, 425, 450, 477, 505, 535, 567, 601, 637, 674,
+};
+
 void init825()
 {
 	reset();
+	::Sleep(1);
 	write_reg(0x1D, OUTPUT_power);
 	write_reg(0x02, 0x0E);
 	::Sleep(1);
@@ -195,6 +208,8 @@ void init825()
 
 	write_reg(0x17, 0x40);//MS_S
 	write_reg(0x18, 0x00);
+
+	printf("HW_ID = %02X\n", read_reg(0x04));
 }
 
 void set_tone(void) {
@@ -213,10 +228,14 @@ void set_tone(void) {
 	::Sleep(1);
 	write_reg(0x08, 0x00);
 
-	write_burst(0x07, &tone_data[0], 35);//write to FIFO
+	//write_burst(0x07, &tone_data[0], 35);//write to FIFO
+	for (int i = 0; i < 35; i++) {
+		write_reg(0x07, tone_data[i]);
+	}
 }
 
-void set_ch(void) {
+void set_ch(uint8 ch) {
+	write_reg(0x0B, ch);//voice num
 	write_reg(0x0F, 0x30);// keyon = 0
 	write_reg(0x10, 0x71);// chvol
 	write_reg(0x11, 0x00);// XVB
@@ -224,16 +243,59 @@ void set_ch(void) {
 	write_reg(0x13, 0x00);// FRAC  
 }
 
-void keyon(unsigned char fnumh, unsigned char fnuml) {
-	write_reg(0x0B, 0x00);//voice num
+void keyon(uint8 ch, uint8 blk, uint16 fnum) {
+	uint8 fnumh = ((fnum >> 4) & 0x38) | (blk & 7);
+	uint8 fnuml = (fnum) & 0x7f;
+	write_reg(0x0B, ch);//voice num
 	write_reg(0x0C, 0x54);//vovol
 	write_reg(0x0D, fnumh);//fnum
 	write_reg(0x0E, fnuml);//fnum
 	write_reg(0x0F, 0x40);//keyon = 1  
 }
 
-void keyoff(void) {
+void keyoff(uint8 ch) {
+	write_reg(0x0B, ch);//voice num
 	write_reg(0x0F, 0x00);//keyon = 0
+}
+
+#define BEATTIME	500
+
+struct SEQ {
+	uint8 oct;
+	uint8 keycode;
+	uint16 duration;
+};
+SEQ daisybell[] = {
+	{ 5, 7, 3, },{ 5, 4, 3, },
+	{ 5, 0, 3, },{ 4, 7, 3, },
+	{ 4, 9, 1, },{ 4, 11, 1, },{ 5, 0, 1, },{ 4, 9, 2, },{ 5, 0, 1, },
+	{ 4, 7, 6, },
+
+	{ 5, 2, 3, },{ 5, 7, 3, },
+	{ 5, 4, 3, },{ 5, 0, 3, },
+	{ 4, 9, 1, },{ 4, 11, 1, },{ 5, 0, 1, },{ 5, 2, 2, },{ 5, 4, 1, },
+	{ 5, 2, 5, },{ 5, 4, 1, },
+
+	{ 5, 5, 1, },{ 5, 4, 1, },{ 5, 2, 1, },{ 5, 7, 2, },{ 5, 4, 1, },
+	{ 5, 2, 1, },{ 5, 0, 4, },{ 5, 2, 1, },{ 5, 4, 2, },{ 5, 0, 1, },
+	{ 4, 9, 2, },{ 5, 0, 1, },{ 4, 9, 1, },{ 4, 7, 4, },{ 4, 7, 1, },
+	{ 5, 0, 2, },{ 5, 4, 1, },{ 5, 2, 2, },{ 4, 7, 1, },
+	{ 5, 0, 2, },{ 5, 4, 1, },{ 5, 2, 1, },{ 5, 4, 1, },{ 5, 5, 1, },
+	{ 5, 7, 1, },{ 5, 4, 1, },{ 5, 0, 1, },{ 5, 2, 2, },{ 4, 7, 1, },
+	{ 5, 0, 6, },
+	{ 0xff, 0xff, 0xffff, },
+};
+
+void play(SEQ* seq)
+{
+	const char* keyname[] = { "c", "c+", "d", "d+", "e", "f", "f+", "g", "g+", "a", "a+", "b", };
+	while (seq && !(seq->oct == 0xff && seq->keycode == 0xff && seq->duration == 0xffff)) {
+		printf("o%i %s %i\n", seq->oct, keyname[seq->keycode], seq->duration);
+		keyon(0, seq->oct, seq->keycode);
+		::Sleep(BEATTIME * seq->duration);
+		keyoff(0);
+		seq++;
+	}
 }
 
 int main()
@@ -285,6 +347,10 @@ int main()
 		APP_CHECK_STATUS(status);
 
 		init825();
+		set_tone();
+		set_ch(0);
+
+		play(daisybell);
 
 		status = SPI_CloseChannel(ftHandle);
 	}
