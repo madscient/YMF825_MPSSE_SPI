@@ -236,26 +236,39 @@ void set_tone(void) {
 
 void set_ch(uint8 ch) {
 	write_reg(0x0B, ch);//voice num
+	printf("verify: %02X\n", read_reg(0x0B));
 	write_reg(0x0F, 0x30);// keyon = 0
+	printf("verify: %02X\n", read_reg(0x0F));
 	write_reg(0x10, 0x71);// chvol
+	printf("verify: %02X\n", read_reg(0x10));
 	write_reg(0x11, 0x00);// XVB
+	printf("verify: %02X\n", read_reg(0x11));
 	write_reg(0x12, 0x08);// FRAC
+	printf("verify: %02X\n", read_reg(0x12));
 	write_reg(0x13, 0x00);// FRAC  
+	printf("verify: %02X\n", read_reg(0x13));
 }
 
 void keyon(uint8 ch, uint8 blk, uint16 fnum) {
 	uint8 fnumh = ((fnum >> 4) & 0x38) | (blk & 7);
 	uint8 fnuml = (fnum) & 0x7f;
 	write_reg(0x0B, ch);//voice num
+	printf("verify: %02X\n", read_reg(0x0B));
 	write_reg(0x0C, 0x54);//vovol
+	printf("verify: %02X\n", read_reg(0x0C));
 	write_reg(0x0D, fnumh);//fnum
+	printf("verify: %02X\n", read_reg(0x0D));
 	write_reg(0x0E, fnuml);//fnum
+	printf("verify: %02X\n", read_reg(0x0E));
 	write_reg(0x0F, 0x40);//keyon = 1  
+	printf("verify: %02X\n", read_reg(0x0F));
 }
 
 void keyoff(uint8 ch) {
 	write_reg(0x0B, ch);//voice num
+	printf("verify: %02X\n", read_reg(0x0B));
 	write_reg(0x0F, 0x00);//keyon = 0
+	printf("verify: %02X\n", read_reg(0x0F));
 }
 
 #define BEATTIME	500
