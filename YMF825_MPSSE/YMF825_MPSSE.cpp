@@ -66,14 +66,10 @@ encountered \n",__FILE__, __LINE__, __FUNCTION__);exit(1);}else{;}};
 /* Application specific macro definations */
 #define SPI_DEVICE_BUFFER_SIZE		256
 #define SPI_WRITE_COMPLETION_RETRY		10
-#define START_ADDRESS_EEPROM 	0x00 /*read/write start address inside the EEPROM*/
-#define END_ADDRESS_EEPROM		0x10
-#define RETRY_COUNT_EEPROM		10	/* number of retries if read/write fails */
 #define CHANNEL_TO_OPEN			0	/*0 for first available channel, 1 for next... */
 #define SPI_SLAVE_0				0
 #define SPI_SLAVE_1				1
 #define SPI_SLAVE_2				2
-#define DATA_OFFSET				4
 #define USE_WRITEREAD			0
 
 /******************************************************************************/
@@ -88,10 +84,15 @@ static uint8 buffer[SPI_DEVICE_BUFFER_SIZE] = { 0 };
 
 void reset()
 {
-	FT_WriteGPIO(ftHandle, 0xff, 0xff);
-	FT_WriteGPIO(ftHandle, 0xff, 0x0);
+	FT_STATUS status;
+	status = FT_WriteGPIO(ftHandle, 0xff, 0xff);
+	APP_CHECK_STATUS(status);
+	status = FT_WriteGPIO(ftHandle, 0xff, 0x0);
+	APP_CHECK_STATUS(status);
 	::Sleep(1);
-	FT_WriteGPIO(ftHandle, 0xff, 0xff);
+	status = FT_WriteGPIO(ftHandle, 0xff, 0xff);
+	APP_CHECK_STATUS(status);
+	::Sleep(20);
 }
 
 void write_reg(uint8 addr, uint8 data)
@@ -120,23 +121,28 @@ void write_reg(uint8 addr, uint8 data)
 
 void write_burst(uint8 addr, uint8* data, uint32 size)
 {
-	uint32 sizeToTransfer = size + 1;
+	uint32 sizeToTransfer = 1;
 	uint32 sizeTransfered = 0;
 	uint8 writeComplete = 0;
 	uint32 retry = 0;
 	FT_STATUS status;
-	byte* buf = new byte[size+1];
 
-	buf[0] = addr;
-	memcpy(&buf[1], data, size);
 	/* Write command EWEN(with CS_High -> CS_Low) */
 	sizeTransfered = 0;
-	status = SPI_Write(ftHandle, buf, sizeToTransfer, &sizeTransfered,
+
+	status = SPI_Write(ftHandle, &addr, sizeToTransfer, &sizeTransfered,
 		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE);
+	APP_CHECK_STATUS(status);
+	for (uint32 i = 0; i < (size-1); i++) {
+		status = SPI_Write(ftHandle, &data[i], sizeToTransfer, &sizeTransfered,
+			SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES);
+		APP_CHECK_STATUS(status);
+	}
+	status = SPI_Write(ftHandle, &data[size-1], sizeToTransfer, &sizeTransfered,
+		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES |
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
 	APP_CHECK_STATUS(status);
-	delete[] buf;
 }
 
 uint8 read_reg(uint8 addr)
@@ -180,34 +186,47 @@ uint16 freqtable[] = {
 
 void init825()
 {
-	reset();
-	::Sleep(1);
 	write_reg(0x1D, OUTPUT_power);
-	write_reg(0x02, 0x0E);
+	printf("verify: %02X\n", read_reg(0x1d));
+	write_reg(0x02, 0x0f);
+	printf("verify: %02X\n", read_reg(0x02));
 	::Sleep(1);
 	write_reg(0x00, 0x01);//CLKEN
+	printf("verify: %02X\n", read_reg(0x00));
 	write_reg(0x01, 0x00); //AKRST
+	printf("verify: %02X\n", read_reg(0x01));
 	write_reg(0x1A, 0xA3);
+	printf("verify: %02X\n", read_reg(0x1a));
 	::Sleep(1);
 	write_reg(0x1A, 0x00);
+	printf("verify: %02X\n", read_reg(0x1a));
 	::Sleep(30);
-	write_reg(0x02, 0x04);//AP1,AP3
-	::Sleep(1);
 	write_reg(0x02, 0x00);
+	printf("verify: %02X\n", read_reg(0x02));
 	//add
-	write_reg(0x19, 0x20);//MASTER VOL
+	write_reg(0x19, 0x33);//MASTER VOL
+	printf("verify: %02X\n", read_reg(0x19));
 	write_reg(0x1B, 0x3F);//interpolation
+	printf("verify: %02X\n", read_reg(0x1b));
 	write_reg(0x14, 0x00);//interpolation
-	write_reg(0x03, 0x01);//Analog Gain
+	printf("verify: %02X\n", read_reg(0x14));
+	write_reg(0x03, 0x03);//Analog Gain
+	printf("verify: %02X\n", read_reg(0x03));
 
 	write_reg(0x08, 0xF6);
+	printf("verify: %02X\n", read_reg(0x08));
 	::Sleep(21);
 	write_reg(0x08, 0x00);
+	printf("verify: %02X\n", read_reg(0x08));
 	write_reg(0x09, 0xF8);
+	printf("verify: %02X\n", read_reg(0x09));
 	write_reg(0x0A, 0x00);
+	printf("verify: %02X\n", read_reg(0x0a));
 
 	write_reg(0x17, 0x40);//MS_S
+	printf("verify: %02X\n", read_reg(0x17));
 	write_reg(0x18, 0x00);
+	printf("verify: %02X\n", read_reg(0x18));
 
 	printf("HW_ID = %02X\n", read_reg(0x04));
 }
@@ -228,50 +247,38 @@ void set_tone(void) {
 	::Sleep(1);
 	write_reg(0x08, 0x00);
 
-	//write_burst(0x07, &tone_data[0], 35);//write to FIFO
-	for (int i = 0; i < 35; i++) {
-		write_reg(0x07, tone_data[i]);
-	}
+	write_burst(0x07, tone_data, 35);//write to FIFO
+	//for (int i = 0; i < 35; i++) {
+	//	write_reg(0x07, tone_data[i]);
+	//}
 }
 
 void set_ch(uint8 ch) {
 	write_reg(0x0B, ch);//voice num
 	printf("verify: %02X\n", read_reg(0x0B));
 	write_reg(0x0F, 0x30);// keyon = 0
-	printf("verify: %02X\n", read_reg(0x0F));
-	write_reg(0x10, 0x71);// chvol
-	printf("verify: %02X\n", read_reg(0x10));
+	write_reg(0x10, 0x7d);// chvol
 	write_reg(0x11, 0x00);// XVB
-	printf("verify: %02X\n", read_reg(0x11));
 	write_reg(0x12, 0x08);// FRAC
-	printf("verify: %02X\n", read_reg(0x12));
 	write_reg(0x13, 0x00);// FRAC  
-	printf("verify: %02X\n", read_reg(0x13));
 }
 
 void keyon(uint8 ch, uint8 blk, uint16 fnum) {
 	uint8 fnumh = ((fnum >> 4) & 0x38) | (blk & 7);
 	uint8 fnuml = (fnum) & 0x7f;
 	write_reg(0x0B, ch);//voice num
-	printf("verify: %02X\n", read_reg(0x0B));
-	write_reg(0x0C, 0x54);//vovol
-	printf("verify: %02X\n", read_reg(0x0C));
+	write_reg(0x0C, 0x7c);//vovol
 	write_reg(0x0D, fnumh);//fnum
-	printf("verify: %02X\n", read_reg(0x0D));
 	write_reg(0x0E, fnuml);//fnum
-	printf("verify: %02X\n", read_reg(0x0E));
 	write_reg(0x0F, 0x40);//keyon = 1  
-	printf("verify: %02X\n", read_reg(0x0F));
 }
 
 void keyoff(uint8 ch) {
 	write_reg(0x0B, ch);//voice num
-	printf("verify: %02X\n", read_reg(0x0B));
 	write_reg(0x0F, 0x00);//keyon = 0
-	printf("verify: %02X\n", read_reg(0x0F));
 }
 
-#define BEATTIME	500
+#define BEATTIME	333
 
 struct SEQ {
 	uint8 oct;
@@ -303,8 +310,8 @@ void play(SEQ* seq)
 {
 	const char* keyname[] = { "c", "c+", "d", "d+", "e", "f", "f+", "g", "g+", "a", "a+", "b", };
 	while (seq && !(seq->oct == 0xff && seq->keycode == 0xff && seq->duration == 0xffff)) {
-		printf("o%i %s %i\n", seq->oct, keyname[seq->keycode], seq->duration);
-		keyon(0, seq->oct, seq->keycode);
+		printf("o%i%s(%i) %i\n", seq->oct, keyname[seq->keycode], freqtable[seq->keycode], seq->duration);
+		keyon(0, seq->oct, freqtable[seq->keycode]);
 		::Sleep(BEATTIME * seq->duration);
 		keyoff(0);
 		seq++;
@@ -358,6 +365,10 @@ int main()
 		printf("\nhandle=0x%x status=0x%x\n", (unsigned int)ftHandle, status);
 		status = SPI_InitChannel(ftHandle, &channelConf);
 		APP_CHECK_STATUS(status);
+
+		reset();
+		::Sleep(10);
+
 
 		init825();
 		set_tone();
