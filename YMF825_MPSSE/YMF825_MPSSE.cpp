@@ -70,51 +70,34 @@ uint16 freqtable[] = {
 void init825()
 {
 	write_reg(0x1D, OUTPUT_power, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x1d));
 	write_reg(0x02, 0x0f, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x02));
 	pInterface->SPI_Flush();
 	::Sleep(1);
 	write_reg(0x00, 0x01, CS_BOTH);//CLKEN
-	//printf("verify: %02X\n", read_reg(0x00));
 	write_reg(0x01, 0x00, CS_BOTH); //AKRST
-	//printf("verify: %02X\n", read_reg(0x01));
 	write_reg(0x1A, 0xA3, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x1a));
 	pInterface->SPI_Flush();
 	::Sleep(1);
 	write_reg(0x1A, 0x00, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x1a));
 	pInterface->SPI_Flush();
 	::Sleep(30);
 	write_reg(0x02, 0x00, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x02));
 	//add
 	write_reg(0x19, 0x33<<2, CS_BOTH);//MASTER VOL
-	//printf("verify: %02X\n", read_reg(0x19));
 	write_reg(0x1B, 0x3F, CS_BOTH);//interpolation
-	//printf("verify: %02X\n", read_reg(0x1b));
 	write_reg(0x14, 0x00, CS_BOTH);//interpolation
-	//printf("verify: %02X\n", read_reg(0x14));
 	write_reg(0x03, 0x01, CS_BOTH);//Analog Gain
-	//printf("verify: %02X\n", read_reg(0x03));
 
 	write_reg(0x08, 0xF6, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x08));
+	pInterface->SPI_Flush();
 	::Sleep(21);
 	write_reg(0x08, 0x00, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x08));
 	write_reg(0x09, 0xF8, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x09));
 	write_reg(0x0A, 0x00, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x0a));
 
 	write_reg(0x17, 0x40, CS_BOTH);//MS_S
-	//printf("verify: %02X\n", read_reg(0x17));
 	write_reg(0x18, 0x00, CS_BOTH);
-	//printf("verify: %02X\n", read_reg(0x18));
 
-	//printf("HW_ID = %02X\n", read_reg(0x04));
 	pInterface->SPI_Flush();
 }
 
@@ -232,22 +215,33 @@ unsigned char tone_data1[] = {
 
 void set_tone(byte* tone_data, size_t len) {
 
-	write_reg(0x08, 0xF6, CS_BOTH);
-	::Sleep(1);
-	write_reg(0x08, 0x00, CS_BOTH);
+	//write_reg(0x08, 0xF6, CS_BOTH);
+	//pInterface->SPI_Flush();
+	//::Sleep(1);
+	//write_reg(0x08, 0x00, CS_BOTH);
 
 	write_burst(0x07, tone_data, len, CS_BOTH);//write to FIFO
-	//for (int i = 0; i < 35; i++) {
-	//	write_reg(0x07, tone_data[i]);
-	//}
+	pInterface->SPI_Flush();
+}
+
+void set_volume(uint8 ch, uint8 chvol, uint8 panpot)
+{
+	int pan = panpot;
+	pan = (pan < 0) ? 0 : pan;
+	double lgain = cos(M_PI_2 * pan / 126.0);
+	double rgain = sin(M_PI_2 * pan / 126.0);
+	write_reg(0x0B, ch, CS_LEFT);//voice num
+	write_reg(0x10, (uint8)round(double(chvol) * lgain), CS_LEFT);// chvol
+	pInterface->SPI_Flush();
+	write_reg(0x0B, ch, CS_RIGHT);//voice num
+	write_reg(0x10, (uint8)round(double(chvol) * rgain), CS_RIGHT);// chvol
 	pInterface->SPI_Flush();
 }
 
 void set_ch(uint8 ch) {
 	write_reg(0x0B, ch, CS_BOTH);//voice num
-	//printf("verify: %02X\n", read_reg(0x0B));
 	write_reg(0x0F, 0x30, CS_BOTH);// keyon = 0
-	write_reg(0x10, 0x7d, CS_BOTH);// chvol
+	//write_reg(0x10, 0x7d, CS_BOTH);// chvol
 	write_reg(0x11, 0x00, CS_BOTH);// XVB
 	write_reg(0x12, 0x08, CS_BOTH);// FRAC
 	write_reg(0x13, 0x00, CS_BOTH);// FRAC  
@@ -328,6 +322,7 @@ int main()
 	init825();
 	set_tone(tone_data1, sizeof(tone_data1));
 	set_ch(2);
+	set_volume(2, 120, 64);
 
 	play(2, daisybell);
 

@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <tchar.h>
 #include <assert.h>
+#define _USE_MATH_DEFINES
+#include <math.h>
 
 typedef unsigned char uint8;
 typedef unsigned short uint16;
