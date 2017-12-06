@@ -3,38 +3,6 @@
 
 #include "stdafx.h"
 
-/*!
-* \file sample-static.c
-*
-* \author FTDI
-* \date 20110512
-*
-* Copyright © 2000-2014 Future Technology Devices International Limited
-*
-*
-* THIS SOFTWARE IS PROVIDED BY FUTURE TECHNOLOGY DEVICES INTERNATIONAL LIMITED ``AS IS'' AND ANY EXPRESS
-* OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-* FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL FUTURE TECHNOLOGY DEVICES INTERNATIONAL LIMITED
-* BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-* BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-* INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-* (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
-* THE POSSIBILITY OF SUCH DAMAGE.
-*
-* Project: libMPSSE
-* Module: SPI Sample Application - Interfacing 94LC56B SPI EEPROM
-*
-* Rivision History:
-* 0.1  - 20110512 - Initial version
-* 0.2  - 20110801 - Changed LatencyTimer to 255
-* 					 Attempt to open channel only if available
-*					 Added & modified macros
-*					 Included stdlib.h
-* 0.3  - 20111212 - Added comments
-* 0.41 - 20140903 - Fixed compilation warnings
-*					 Added testing of SPI_ReadWrite()
-*/
-
 /******************************************************************************/
 /* 							 Include files										   */
 /******************************************************************************/
@@ -42,142 +10,57 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
-/* OS specific libraries */
-#ifdef _WIN32
-#include<windows.h>
-#endif
+#include "FTSPI.h"
 
-/* Include D2XX header*/
-#include "ftd2xx.h"
+CFTSPI* pInterface;
+const int chidx = 0;		// Interface ID
 
-/* Include libMPSSE header */
-#include "libMPSSE_spi.h"
-
-/******************************************************************************/
-/*								Macro and type defines							   */
-/******************************************************************************/
-/* Helper macros */
-
-#define APP_CHECK_STATUS(exp) {if(exp!=FT_OK){printf("%s:%d:%s(): status(0x%x) \
-!= FT_OK\n",__FILE__, __LINE__, __FUNCTION__,exp);exit(1);}else{;}};
-#define CHECK_NULL(exp){if(exp==NULL){printf("%s:%d:%s():  NULL expression \
-encountered \n",__FILE__, __LINE__, __FUNCTION__);exit(1);}else{;}};
-
-/* Application specific macro definations */
-#define SPI_DEVICE_BUFFER_SIZE		256
-#define SPI_WRITE_COMPLETION_RETRY		10
-#define CHANNEL_TO_OPEN			0	/*0 for first available channel, 1 for next... */
-#define SPI_SLAVE_0				0
-#define SPI_SLAVE_1				1
-#define SPI_SLAVE_2				2
-#define USE_WRITEREAD			0
-
-/******************************************************************************/
-/*								Global variables							  	    */
-/******************************************************************************/
-static FT_HANDLE ftHandle;
-static uint8 buffer[SPI_DEVICE_BUFFER_SIZE] = { 0 };
-
-/******************************************************************************/
-/*						Public function definitions						  		   */
-/******************************************************************************/
+#define CS_LEFT		0xf0
+#define CS_RIGHT	0xe8
+#define CS_BOTH		0xe0
 
 void reset()
 {
-	FT_STATUS status;
-	status = FT_WriteGPIO(ftHandle, 0xff, 0xff);
-	APP_CHECK_STATUS(status);
-	status = FT_WriteGPIO(ftHandle, 0xff, 0x0);
-	APP_CHECK_STATUS(status);
-	::Sleep(1);
-	status = FT_WriteGPIO(ftHandle, 0xff, 0xff);
-	APP_CHECK_STATUS(status);
-	::Sleep(20);
+	pInterface->FT_WriteGPIO(chidx, 0xff, 0xff);
+	::Sleep(2);
+	pInterface->FT_WriteGPIO(chidx, 0xff, 0x00);
+	::Sleep(2);
+	pInterface->FT_WriteGPIO(chidx, 0xff, 0xff);
+	pInterface->SPI_Flush();
 }
 
-void write_reg(uint8 addr, uint8 data)
+void write_reg(uint8 addr, uint8 data, uint8 csmask)
 {
-	uint32 sizeToTransfer = 0;
-	uint32 sizeTransfered = 0;
-	uint8 writeComplete = 0;
-	uint32 retry = 0;
+	UINT32 sizeToTransfer = 0;
+	UINT32 sizeTransfered = 0;
 	FT_STATUS status;
-	byte buf[2];
+	BYTE buf[2];
 
-	buf[0] = addr;
-	buf[1] = data;
-	/* Write command EWEN(with CS_High -> CS_Low) */
-	sizeToTransfer = 16;
+	buf[0] = BYTE(addr);
+	buf[1] = BYTE(data);
+	sizeToTransfer = 2;
 	sizeTransfered = 0;
-	status = SPI_Write(ftHandle, buf, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-	APP_CHECK_STATUS(status);
-	if (sizeToTransfer == sizeTransfered) {
-		printf("write_reg %02X, %02X OK\n", addr, data);
-	}
+	status = pInterface->SPI_Write(chidx, buf, sizeToTransfer, csmask);
+	//pInterface->SPI_Flush(chidx);
 }
 
-void write_burst(uint8 addr, uint8* data, uint32 size)
+void write_burst(BYTE* buf, size_t length, uint8 csmask)
 {
-	uint32 sizeToTransfer = 1;
-	uint32 sizeTransfered = 0;
-	uint8 writeComplete = 0;
-	uint32 retry = 0;
-	FT_STATUS status;
-
-	/* Write command EWEN(with CS_High -> CS_Low) */
-	sizeTransfered = 0;
-
-	status = SPI_Write(ftHandle, &addr, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE);
-	APP_CHECK_STATUS(status);
-	for (uint32 i = 0; i < (size-1); i++) {
-		status = SPI_Write(ftHandle, &data[i], sizeToTransfer, &sizeTransfered,
-			SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES);
-		APP_CHECK_STATUS(status);
-	}
-	status = SPI_Write(ftHandle, &data[size-1], sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-	APP_CHECK_STATUS(status);
+	FT_STATUS status = pInterface->SPI_Write(chidx, buf, length, csmask);
+	//pInterface->SPI_Flush(chidx);
+	assert(status == FT_OK);
 }
 
-uint8 read_reg(uint8 addr)
+void write_burst(uint8 addr, uint8* data, uint32 size, uint8 csmask)
 {
-	uint8 ret = 0xff;
-	uint32 sizeToTransfer = 1;
-	uint32 sizeTransfered = 0;
-	uint8 writeComplete = 0;
-	uint32 retry = 0;
-	uint8 buf = 0x80 | addr;
-	FT_STATUS status;
-	status = SPI_Write(ftHandle, &buf, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE);
-	APP_CHECK_STATUS(status);
-	status = SPI_Read(ftHandle, &ret, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-	APP_CHECK_STATUS(status);
-	return ret;
+	BYTE* newbuf = new BYTE[size + 1];
+	newbuf[0] = BYTE(addr);
+	memcpy(&newbuf[1], data, size);
+	write_burst(newbuf, size + 1, csmask);
+	delete[] newbuf;
 }
 
-/*!
-* \brief Main function / Entry point to the sample application
-*
-* This function is the entry point to the sample application. It opens the channel, writes to the
-* EEPROM and reads back.
-*
-* \param[in] none
-* \return Returns 0 for success
-* \sa
-* \note
-* \warning
-*/
-#define OUTPUT_power 0
+#define OUTPUT_power 1
 
 uint16 freqtable[] = {
 	//c  c+   d    d+   e    f    f+   g    g+   a    a+   b
@@ -186,134 +69,247 @@ uint16 freqtable[] = {
 
 void init825()
 {
-	write_reg(0x1D, OUTPUT_power);
-	printf("verify: %02X\n", read_reg(0x1d));
-	write_reg(0x02, 0x0f);
-	printf("verify: %02X\n", read_reg(0x02));
+	write_reg(0x1D, OUTPUT_power, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x1d));
+	write_reg(0x02, 0x0f, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x02));
+	pInterface->SPI_Flush();
 	::Sleep(1);
-	write_reg(0x00, 0x01);//CLKEN
-	printf("verify: %02X\n", read_reg(0x00));
-	write_reg(0x01, 0x00); //AKRST
-	printf("verify: %02X\n", read_reg(0x01));
-	write_reg(0x1A, 0xA3);
-	printf("verify: %02X\n", read_reg(0x1a));
+	write_reg(0x00, 0x01, CS_BOTH);//CLKEN
+	//printf("verify: %02X\n", read_reg(0x00));
+	write_reg(0x01, 0x00, CS_BOTH); //AKRST
+	//printf("verify: %02X\n", read_reg(0x01));
+	write_reg(0x1A, 0xA3, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x1a));
+	pInterface->SPI_Flush();
 	::Sleep(1);
-	write_reg(0x1A, 0x00);
-	printf("verify: %02X\n", read_reg(0x1a));
+	write_reg(0x1A, 0x00, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x1a));
+	pInterface->SPI_Flush();
 	::Sleep(30);
-	write_reg(0x02, 0x00);
-	printf("verify: %02X\n", read_reg(0x02));
+	write_reg(0x02, 0x00, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x02));
 	//add
-	write_reg(0x19, 0x33);//MASTER VOL
-	printf("verify: %02X\n", read_reg(0x19));
-	write_reg(0x1B, 0x3F);//interpolation
-	printf("verify: %02X\n", read_reg(0x1b));
-	write_reg(0x14, 0x00);//interpolation
-	printf("verify: %02X\n", read_reg(0x14));
-	write_reg(0x03, 0x03);//Analog Gain
-	printf("verify: %02X\n", read_reg(0x03));
+	write_reg(0x19, 0x33<<2, CS_BOTH);//MASTER VOL
+	//printf("verify: %02X\n", read_reg(0x19));
+	write_reg(0x1B, 0x3F, CS_BOTH);//interpolation
+	//printf("verify: %02X\n", read_reg(0x1b));
+	write_reg(0x14, 0x00, CS_BOTH);//interpolation
+	//printf("verify: %02X\n", read_reg(0x14));
+	write_reg(0x03, 0x01, CS_BOTH);//Analog Gain
+	//printf("verify: %02X\n", read_reg(0x03));
 
-	write_reg(0x08, 0xF6);
-	printf("verify: %02X\n", read_reg(0x08));
+	write_reg(0x08, 0xF6, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x08));
 	::Sleep(21);
-	write_reg(0x08, 0x00);
-	printf("verify: %02X\n", read_reg(0x08));
-	write_reg(0x09, 0xF8);
-	printf("verify: %02X\n", read_reg(0x09));
-	write_reg(0x0A, 0x00);
-	printf("verify: %02X\n", read_reg(0x0a));
+	write_reg(0x08, 0x00, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x08));
+	write_reg(0x09, 0xF8, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x09));
+	write_reg(0x0A, 0x00, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x0a));
 
-	write_reg(0x17, 0x40);//MS_S
-	printf("verify: %02X\n", read_reg(0x17));
-	write_reg(0x18, 0x00);
-	printf("verify: %02X\n", read_reg(0x18));
+	write_reg(0x17, 0x40, CS_BOTH);//MS_S
+	//printf("verify: %02X\n", read_reg(0x17));
+	write_reg(0x18, 0x00, CS_BOTH);
+	//printf("verify: %02X\n", read_reg(0x18));
 
-	printf("HW_ID = %02X\n", read_reg(0x04));
+	//printf("HW_ID = %02X\n", read_reg(0x04));
+	pInterface->SPI_Flush();
 }
 
-void set_tone(void) {
-	unsigned char tone_data[35] = {
-		0x81,//header
-			 //T_ADR 0
-			 0x01,0x85,
-			 0x00,0x7F,0xF4,0xBB,0x00,0x10,0x40,
-			 0x00,0xAF,0xA0,0x0E,0x03,0x10,0x40,
-			 0x00,0x2F,0xF3,0x9B,0x00,0x20,0x41,
-			 0x00,0xAF,0xA0,0x0E,0x01,0x10,0x40,
-			 0x80,0x03,0x81,0x80,
-	};
+unsigned char tone_data0[35] = {
+	0x81,//header
+		 //T_ADR 0
+		 0x01,0x85,
+		 0x00,0x7F,0xF4,0xBB,0x00,0x10,0x40,
+		 0x00,0xAF,0xA0,0x0E,0x03,0x10,0x40,
+		 0x00,0x2F,0xF3,0x9B,0x00,0x20,0x41,
+		 0x00,0xAF,0xA0,0x0E,0x01,0x10,0x40,
+		 0x80,0x03,0x81,0x80,
+};
 
-	write_reg(0x08, 0xF6);
+unsigned char tone_data1[] = {
+	0x90 //header
+	 //Tone No.0
+	,0x01, 0x43
+	, 0x00, 0x67, 0xFF, 0x25, 0x00, 0x10, 0x40
+	, 0x21, 0x33, 0xE2, 0x1F, 0x00, 0x50, 0x00
+	, 0x10, 0x41, 0xD3, 0x14, 0x02, 0x10, 0x00
+	, 0x21, 0x63, 0xD4, 0x02, 0x02, 0x10, 0x00
+	//Tone No.1
+	,0x01, 0x43
+	, 0x21, 0x22, 0xF5, 0x26, 0x00, 0x10, 0x00
+	, 0x20, 0x32, 0xFF, 0x1E, 0x00, 0x50, 0x00
+	, 0x21, 0x22, 0xFD, 0x1A, 0x02, 0x10, 0x00
+	, 0x11, 0x52, 0xF4, 0x08, 0x02, 0x10, 0x00
+	//Tone No.2
+	,0x01, 0x45
+	, 0x21, 0x42, 0xD6, 0x15, 0x00, 0x40, 0x06
+	, 0x11, 0x61, 0xD7, 0x0A, 0x02, 0x10, 0x00
+	, 0x31, 0x43, 0xDE, 0x09, 0x00, 0x20, 0x00
+	, 0x11, 0x51, 0xDF, 0x0A, 0x02, 0x20, 0x00
+	//Tone No.3
+	,0x01, 0x45
+	, 0x21, 0x51, 0xFE, 0x18, 0x13, 0x10, 0x06
+	, 0x21, 0xA3, 0xD3, 0x02, 0x16, 0x20, 0x00
+	, 0x20, 0x51, 0xC3, 0x14, 0x20, 0x10, 0x05
+	, 0x31, 0xA3, 0xD3, 0x02, 0x11, 0x20, 0x00
+	//Tone No.4
+	,0x01, 0x83
+	, 0x21, 0xA3, 0xB3, 0x19, 0x60, 0x30, 0x01
+	, 0x20, 0x92, 0xB4, 0x1B, 0x01, 0x30, 0x00
+	, 0x11, 0x44, 0xA1, 0x11, 0x01, 0x20, 0x01
+	, 0x11, 0x71, 0xA8, 0x04, 0x62, 0x10, 0x00
+	//Tone No.5
+	,0x01, 0x45
+	, 0x51, 0xC4, 0xFB, 0x20, 0x11, 0x70, 0x95
+	, 0x10, 0x82, 0xFF, 0x06, 0x12, 0x10, 0x00
+	, 0x11, 0xB0, 0xF1, 0x11, 0x11, 0x10, 0x02
+	, 0x11, 0x72, 0xFF, 0x04, 0x12, 0x10, 0x00
+	//Tone No.6
+	,0x01, 0x46
+	, 0x21, 0x52, 0xE0, 0x01, 0x00, 0x10, 0x24
+	, 0x01, 0x52, 0xF3, 0x17, 0x00, 0x60, 0x18
+	, 0x01, 0x13, 0xF6, 0x1E, 0x00, 0x70, 0x20
+	, 0x21, 0x72, 0xEF, 0x04, 0x06, 0x10, 0x28
+	//Tone No.7
+	,0x01, 0x43
+	, 0x10, 0x61, 0xFF, 0x18, 0x11, 0x10, 0x2D
+	, 0x10, 0x51, 0xF0, 0x1C, 0x11, 0x10, 0x00
+	, 0x31, 0x73, 0xF2, 0x19, 0x11, 0x70, 0x20
+	, 0x21, 0x92, 0xF2, 0x08, 0x12, 0x30, 0x00
+	//Tone No.8
+	,0x01, 0x45
+	, 0x61, 0x56, 0xEF, 0x16, 0x00, 0x90, 0x12
+	, 0x40, 0x44, 0xDE, 0x04, 0x02, 0x10, 0x00
+	, 0x61, 0x66, 0xEC, 0x17, 0x00, 0xB0, 0x28
+	, 0x40, 0x44, 0xEE, 0x04, 0x02, 0x10, 0x00
+	//Tone No.9
+	,0x01, 0x47
+	, 0x31, 0x49, 0xF4, 0x08, 0x11, 0x70, 0x00
+	, 0x21, 0x3B, 0xFB, 0x0C, 0x11, 0x40, 0x00
+	, 0x21, 0x43, 0xF4, 0x11, 0x11, 0x20, 0x01
+	, 0x30, 0x44, 0xFE, 0x04, 0x11, 0x10, 0x00
+	//Tone No.10
+	,0x01, 0x45
+	, 0x21, 0x25, 0x50, 0x22, 0x00, 0x20, 0x08
+	, 0x31, 0x24, 0xF0, 0x01, 0x02, 0x10, 0x00
+	, 0x21, 0x25, 0xA0, 0x1C, 0x00, 0x90, 0x08
+	, 0x11, 0x12, 0xF0, 0x04, 0x02, 0x10, 0x00
+	//Tone No.11
+	,0x01, 0x45
+	, 0x20, 0x44, 0xC2, 0x14, 0x12, 0x70, 0x00
+	, 0x21, 0x59, 0xD6, 0x06, 0x32, 0x40, 0x00
+	, 0x21, 0x34, 0xC2, 0x1C, 0x32, 0x80, 0x00
+	, 0x30, 0x42, 0xDF, 0x04, 0x62, 0x10, 0x00
+	//Tone No.12
+	,0x01, 0x45
+	, 0x41, 0x47, 0xAF, 0x29, 0x00, 0xC0, 0x07
+	, 0x40, 0x54, 0xBF, 0x04, 0x02, 0x10, 0x00
+	, 0x61, 0x47, 0xBF, 0x20, 0x00, 0x60, 0x00
+	, 0x51, 0x54, 0xDF, 0x04, 0x02, 0x10, 0x00
+	//Tone No.13
+	,0x01, 0x45
+	, 0x60, 0x69, 0xFD, 0x1A, 0x00, 0x50, 0x02
+	, 0x50, 0x77, 0xFD, 0x00, 0x06, 0x10, 0x00
+	, 0x61, 0x66, 0xFA, 0x1E, 0x00, 0x50, 0x00
+	, 0x60, 0x76, 0xFE, 0x02, 0x06, 0x10, 0x00
+	//Tone No.14
+	,0x01, 0x45
+	, 0x30, 0x34, 0xF5, 0x11, 0x60, 0xA0, 0x80
+	, 0x20, 0x33, 0xF2, 0x04, 0x06, 0x10, 0x00
+	, 0x30, 0x34, 0xF5, 0x11, 0x60, 0x70, 0x47
+	, 0x20, 0x33, 0xF2, 0x06, 0x06, 0x20, 0x00
+	//Tone No.15
+	,0x01, 0x46
+	, 0x40, 0x4A, 0xEC, 0x06, 0x00, 0x20, 0x0B
+	, 0x30, 0x33, 0xB5, 0x15, 0x00, 0x30, 0x08
+	, 0x30, 0x33, 0xD0, 0x08, 0x00, 0x10, 0x00
+	, 0x40, 0x44, 0xC6, 0x04, 0x06, 0x10, 0x00
+	,0x80,0x03,0x81,0x80,
+};
+
+void set_tone(byte* tone_data, size_t len) {
+
+	write_reg(0x08, 0xF6, CS_BOTH);
 	::Sleep(1);
-	write_reg(0x08, 0x00);
+	write_reg(0x08, 0x00, CS_BOTH);
 
-	write_burst(0x07, tone_data, 35);//write to FIFO
+	write_burst(0x07, tone_data, len, CS_BOTH);//write to FIFO
 	//for (int i = 0; i < 35; i++) {
 	//	write_reg(0x07, tone_data[i]);
 	//}
+	pInterface->SPI_Flush();
 }
 
 void set_ch(uint8 ch) {
-	write_reg(0x0B, ch);//voice num
-	printf("verify: %02X\n", read_reg(0x0B));
-	write_reg(0x0F, 0x30);// keyon = 0
-	write_reg(0x10, 0x7d);// chvol
-	write_reg(0x11, 0x00);// XVB
-	write_reg(0x12, 0x08);// FRAC
-	write_reg(0x13, 0x00);// FRAC  
+	write_reg(0x0B, ch, CS_BOTH);//voice num
+	//printf("verify: %02X\n", read_reg(0x0B));
+	write_reg(0x0F, 0x30, CS_BOTH);// keyon = 0
+	write_reg(0x10, 0x7d, CS_BOTH);// chvol
+	write_reg(0x11, 0x00, CS_BOTH);// XVB
+	write_reg(0x12, 0x08, CS_BOTH);// FRAC
+	write_reg(0x13, 0x00, CS_BOTH);// FRAC  
+	pInterface->SPI_Flush();
 }
 
 void keyon(uint8 ch, uint8 blk, uint16 fnum) {
 	uint8 fnumh = ((fnum >> 4) & 0x38) | (blk & 7);
 	uint8 fnuml = (fnum) & 0x7f;
-	write_reg(0x0B, ch);//voice num
-	write_reg(0x0C, 0x7c);//vovol
-	write_reg(0x0D, fnumh);//fnum
-	write_reg(0x0E, fnuml);//fnum
-	write_reg(0x0F, 0x40);//keyon = 1  
+	write_reg(0x0B, ch, CS_BOTH);//voice num
+	write_reg(0x0C, 0x7c, CS_BOTH);//vovol
+	write_reg(0x0D, fnumh, CS_BOTH);//fnum
+	write_reg(0x0E, fnuml, CS_BOTH);//fnum
+	write_reg(0x0F, 0x44, CS_BOTH);//keyon = 1  
+	pInterface->SPI_Flush();
 }
 
 void keyoff(uint8 ch) {
-	write_reg(0x0B, ch);//voice num
-	write_reg(0x0F, 0x00);//keyon = 0
+	write_reg(0x0B, ch, CS_BOTH);//voice num
+	write_reg(0x0F, 0x04, CS_BOTH);//keyon = 0
+	pInterface->SPI_Flush();
 }
 
 #define BEATTIME	333
 
+
+enum E_KEYCODES {
+	KEY_C, KEY_Cs, KEY_D, KEY_Ds, KEY_E, KEY_F, KEY_Fs, KEY_G, KEY_Gs, KEY_A, KEYAs, KEY_B,
+};
 struct SEQ {
 	uint8 oct;
 	uint8 keycode;
 	uint16 duration;
 };
+
+
 SEQ daisybell[] = {
-	{ 5, 7, 3, },{ 5, 4, 3, },
-	{ 5, 0, 3, },{ 4, 7, 3, },
-	{ 4, 9, 1, },{ 4, 11, 1, },{ 5, 0, 1, },{ 4, 9, 2, },{ 5, 0, 1, },
-	{ 4, 7, 6, },
+	{ 5, KEY_D, 3, }, { 4, KEY_B, 3, },	{ 4, KEY_G, 3, }, { 4, KEY_D, 3, },
+	{ 4, KEY_E, 1, }, { 4, KEY_Fs, 1, }, { 4, KEY_G, 1, }, { 4, KEY_E, 2, }, { 4, KEY_G, 1, },
+	{ 4, KEY_D, 6, },
 
-	{ 5, 2, 3, },{ 5, 7, 3, },
-	{ 5, 4, 3, },{ 5, 0, 3, },
-	{ 4, 9, 1, },{ 4, 11, 1, },{ 5, 0, 1, },{ 5, 2, 2, },{ 5, 4, 1, },
-	{ 5, 2, 5, },{ 5, 4, 1, },
+	{ 4, KEY_A, 3, }, { 5, KEY_D, 3, }, { 4, KEY_B, 3, }, { 4, KEY_G, 3, },
+	{ 4, KEY_E, 1, }, { 4, KEY_Fs, 1, }, { 4, KEY_G, 1, }, { 4, KEY_A, 2, }, { 4, KEY_B, 1, },
+	{ 4, KEY_A, 5, }, { 4, KEY_B, 1, },
 
-	{ 5, 5, 1, },{ 5, 4, 1, },{ 5, 2, 1, },{ 5, 7, 2, },{ 5, 4, 1, },
-	{ 5, 2, 1, },{ 5, 0, 4, },{ 5, 2, 1, },{ 5, 4, 2, },{ 5, 0, 1, },
-	{ 4, 9, 2, },{ 5, 0, 1, },{ 4, 9, 1, },{ 4, 7, 4, },{ 4, 7, 1, },
-	{ 5, 0, 2, },{ 5, 4, 1, },{ 5, 2, 2, },{ 4, 7, 1, },
-	{ 5, 0, 2, },{ 5, 4, 1, },{ 5, 2, 1, },{ 5, 4, 1, },{ 5, 5, 1, },
-	{ 5, 7, 1, },{ 5, 4, 1, },{ 5, 0, 1, },{ 5, 2, 2, },{ 4, 7, 1, },
-	{ 5, 0, 6, },
+	{ 5, KEY_C, 1, }, { 4, KEY_B, 1, }, { 4, KEY_A, 1, }, { 5, KEY_D, 2, }, { 4, KEY_B, 1, },
+	{ 4, KEY_A, 1, }, { 4, KEY_G, 4, }, { 4, KEY_A, 1, },
+	{ 4, KEY_B, 2, }, { 4, KEY_G, 1, }, { 4, KEY_E, 2, }, { 4, KEY_G, 1, }, { 4, KEY_E, 1, }, { 4, KEY_D, 4, }, { 4, KEY_D, 1, },
+	{ 4, KEY_G, 2, }, { 4, KEY_B, 1, }, { 4, KEY_A, 2, }, { 4, KEY_D, 1, },	{ 4, KEY_G, 2, }, { 4, KEY_B, 1, }, { 4, KEY_A, 1, }, { 4, KEY_B, 1, }, { 5, KEY_C, 1, },
+	{ 5, KEY_D, 1, }, { 4, KEY_B, 1, }, { 4, KEY_G, 1, }, { 4, KEY_A, 2, }, { 4, KEY_D, 1, },
+	{ 4, KEY_G, 6, },
 	{ 0xff, 0xff, 0xffff, },
 };
 
-void play(SEQ* seq)
+void play(int ch, SEQ* seq)
 {
 	const char* keyname[] = { "c", "c+", "d", "d+", "e", "f", "f+", "g", "g+", "a", "a+", "b", };
 	while (seq && !(seq->oct == 0xff && seq->keycode == 0xff && seq->duration == 0xffff)) {
 		printf("o%i%s(%i) %i\n", seq->oct, keyname[seq->keycode], freqtable[seq->keycode], seq->duration);
-		keyon(0, seq->oct, freqtable[seq->keycode]);
+		keyon(ch, seq->oct, freqtable[seq->keycode]);
 		::Sleep(BEATTIME * seq->duration);
-		keyoff(0);
+		keyoff(ch);
 		seq++;
 	}
 }
@@ -322,70 +318,21 @@ int main()
 {
 	FT_STATUS status = FT_OK;
 	FT_DEVICE_LIST_INFO_NODE devList = { 0 };
-	ChannelConfig channelConf = { 0 };
-	uint8 address = 0;
-	uint32 channels = 0;
-	uint16 data = 0;
-	uint8 i = 0;
-	uint8 latency = 1;
 
-	channelConf.ClockRate = 10000000;
-	channelConf.LatencyTimer = latency;
-	channelConf.configOptions = SPI_CONFIG_OPTION_MODE0 | SPI_CONFIG_OPTION_CS_ACTIVELOW;// | SPI_CONFIG_OPTION_CS_ACTIVELOW;
-	channelConf.Pin = 0x00000000;/*FinalVal-FinalDir-InitVal-InitDir (for dir 0=in, 1=out)*/
+	pInterface = new CFTSPI();
 
-								 /* init library */
-#ifdef _MSC_VER
-	Init_libMPSSE();
-#endif
-	status = SPI_GetNumChannels(&channels);
-	APP_CHECK_STATUS(status);
-	printf("Number of available SPI channels = %d\n", (int)channels);
-
-	if (channels>0)
-	{
-		for (i = 0; i<channels; i++)
-		{
-			status = SPI_GetChannelInfo(i, &devList);
-			APP_CHECK_STATUS(status);
-			printf("Information on channel number %d:\n", i);
-			/* print the dev info */
-			printf("		Flags=0x%x\n", devList.Flags);
-			printf("		Type=0x%x\n", devList.Type);
-			printf("		ID=0x%x\n", devList.ID);
-			printf("		LocId=0x%x\n", devList.LocId);
-			printf("		SerialNumber=%s\n", devList.SerialNumber);
-			printf("		Description=%s\n", devList.Description);
-			printf("		ftHandle=0x%x\n", (unsigned int)devList.ftHandle);/*is 0 unless open*/
-		}
-
-		/* Open the first available channel */
-		status = SPI_OpenChannel(CHANNEL_TO_OPEN, &ftHandle);
-		APP_CHECK_STATUS(status);
-		printf("\nhandle=0x%x status=0x%x\n", (unsigned int)ftHandle, status);
-		status = SPI_InitChannel(ftHandle, &channelConf);
-		APP_CHECK_STATUS(status);
-
-		reset();
-		::Sleep(10);
+	reset();
+	::Sleep(10);
 
 
-		init825();
-		set_tone();
-		set_ch(0);
+	init825();
+	set_tone(tone_data1, sizeof(tone_data1));
+	set_ch(2);
 
-		play(daisybell);
+	play(2, daisybell);
 
-		status = SPI_CloseChannel(ftHandle);
-	}
+	delete pInterface;
 
-#ifdef _MSC_VER
-	Cleanup_libMPSSE();
-#endif
-
-#ifndef __linux__
-	system("pause");
-#endif
 	return 0;
 }
 

@@ -9,7 +9,12 @@
 
 #include <stdio.h>
 #include <tchar.h>
+#include <assert.h>
 
-
+typedef unsigned char uint8;
+typedef unsigned short uint16;
+typedef unsigned int uint32;
+typedef unsigned __int64 uint64;
 
 // TODO: プログラムに必要な追加ヘッダーをここで参照してください
+#include <Windows.h>
