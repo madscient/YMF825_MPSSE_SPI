@@ -230,10 +230,8 @@ void set_volume(uint8 ch, uint8 chvol, uint8 panpot)
 	pan = (pan < 0) ? 0 : pan;
 	double lgain = cos(M_PI_2 * pan / 126.0);
 	double rgain = sin(M_PI_2 * pan / 126.0);
-	write_reg(0x0B, ch, CS_LEFT);//voice num
+	write_reg(0x0B, ch, CS_BOTH);//voice num
 	write_reg(0x10, (uint8)round(double(chvol) * lgain), CS_LEFT);// chvol
-	pInterface->SPI_Flush();
-	write_reg(0x0B, ch, CS_RIGHT);//voice num
 	write_reg(0x10, (uint8)round(double(chvol) * rgain), CS_RIGHT);// chvol
 	pInterface->SPI_Flush();
 }
