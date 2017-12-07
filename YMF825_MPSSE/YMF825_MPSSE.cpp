@@ -226,7 +226,7 @@ void set_tone(byte* tone_data, size_t len) {
 
 void set_volume(uint8 ch, uint8 chvol, uint8 panpot)
 {
-	int pan = panpot;
+	int pan = int(panpot) - 1;
 	pan = (pan < 0) ? 0 : pan;
 	double lgain = cos(M_PI_2 * pan / 126.0);
 	double rgain = sin(M_PI_2 * pan / 126.0);
